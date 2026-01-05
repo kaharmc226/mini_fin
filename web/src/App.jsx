@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Chart as ChartJS,
   ArcElement,
@@ -22,7 +22,8 @@ export default function App() {
   const [dailyTrend, setDailyTrend] = useState([]);
   const [categorySummary, setCategorySummary] = useState([]);
   const [todayStats, setTodayStats] = useState({ count: 0, total: 0 });
-  const [recentExpenses, setRecentExpenses] = useState([]);
+  const [dayExpenses, setDayExpenses] = useState([]);
+  const [selectedDay, setSelectedDay] = useState(() => new Date().toISOString().slice(0, 10));
   const [toast, setToast] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -42,7 +43,8 @@ export default function App() {
 
   const refreshAll = async () => {
     setLoading(true);
-    await Promise.all([loadCategories(), loadDailyTrend(), loadCategorySummary(), loadToday()]);
+    await Promise.all([loadCategories(), loadDailyTrend(), loadCategorySummary(), loadDay(selectedDay)]);
+    await loadToday();
     setLoading(false);
   };
 
@@ -67,7 +69,29 @@ export default function App() {
     const data = res.data || [];
     const total = data.reduce((sum, e) => sum + Number(e.amount || 0), 0);
     setTodayStats({ count: data.length, total });
-    setRecentExpenses(data.slice(0, 5));
+  };
+
+  const loadDay = useCallback(
+    async (day) => {
+      const from = `${day}T00:00:00`;
+      const to = `${day}T23:59:59`;
+      const res = await apiGet(`/expenses?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+      setDayExpenses((res.data || []).slice(0, 20));
+      setSelectedDay(day);
+    },
+    [setDayExpenses, setSelectedDay]
+  );
+
+  const handleDayClick = useCallback(
+    async (items, event) => {
+      if (!items || items.length === 0) return;
+      const pointIndex = items[0].index;
+      const point = dailyTrend[pointIndex];
+      if (!point) return;
+      await loadDay(point.day);
+    },
+    [dailyTrend, loadDay]
+  );
   };
 
   const handleChange = (field, value) => {
@@ -100,7 +124,7 @@ export default function App() {
     await loadToday();
   };
 
-  const trendChart = useMemo(() => buildTrendChart(dailyTrend), [dailyTrend]);
+  const trendChart = useMemo(() => buildTrendChart(dailyTrend, handleDayClick), [dailyTrend, handleDayClick]);
   const categoryChart = useMemo(() => buildCategoryChart(categorySummary), [categorySummary]);
 
   return (
@@ -150,11 +174,14 @@ export default function App() {
       </div>
 
       <Card title="Today">
-        {recentExpenses.length === 0 ? (
-          <EmptyState message="You haven&apos;t logged any expenses today. Add your first one to start tracking." />
+        {dayExpenses.length === 0 ? (
+          <EmptyState message="Select a day on the chart to view its entries." />
         ) : (
           <ul className="list">
-            {recentExpenses.map((item) => (
+            <div className="muted" style={{ marginBottom: 8 }}>
+              Entries for {selectedDay}
+            </div>
+            {dayExpenses.map((item) => (
               <li key={item.id} className="list-row">
                 <div>
                   <div className="label">{item.note || 'Expense'}</div>
@@ -272,7 +299,7 @@ function defaultDateTimeValue() {
   return new Date(Date.now() - tzOffset).toISOString().slice(0, 16);
 }
 
-function buildTrendChart(points) {
+function buildTrendChart(points, onPointClick) {
   const labels = points.map((p) => p.day);
   const data = points.map((p) => Number(p.total || 0));
   return {
@@ -294,7 +321,8 @@ function buildTrendChart(points) {
       plugins: { legend: { display: false } },
       scales: { y: { ticks: { callback: (v) => `Rp ${formatNumber(v)}` } } },
       responsive: true,
-      maintainAspectRatio: false
+      maintainAspectRatio: false,
+      onClick: (_, elements) => onPointClick && onPointClick(elements)
     }
   };
 }
