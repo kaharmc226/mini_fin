@@ -1,0 +1,7 @@
+node_modules/
+dist/
+build/
+vendor/
+data/expenses.sqlite
+.DS_Store
+*.log
