@@ -129,14 +129,22 @@ export default function App() {
 
       <div className="grid two">
         <Card title="Your Spending This Week">
-          {dailyTrend.length === 0 ? <EmptyState message="No spending logged yet." /> : <Line data={trendChart.data} options={trendChart.options} height={120} />}
+          {dailyTrend.length === 0 ? (
+            <EmptyState message="No spending logged yet." />
+          ) : (
+            <div className="chart">
+              <Line data={trendChart.data} options={trendChart.options} />
+            </div>
+          )}
         </Card>
 
         <Card title="Where Your Money Went">
           {categorySummary.length === 0 ? (
             <EmptyState message="Add a few expenses to see your category breakdown." />
           ) : (
-            <Doughnut data={categoryChart.data} options={categoryChart.options} />
+            <div className="chart">
+              <Doughnut data={categoryChart.data} options={categoryChart.options} />
+            </div>
           )}
         </Card>
       </div>
