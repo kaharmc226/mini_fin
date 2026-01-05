@@ -35,6 +35,15 @@ function current_user_id(): ?int
     return $_SESSION['user']['id'] ?? null;
 }
 
+function require_user_id(): int
+{
+    $userId = current_user_id();
+    if (!$userId) {
+        redirect_with_message('logout.php', 'Sesi berakhir, silakan login kembali.', 'danger');
+    }
+    return $userId;
+}
+
 function fetch_categories(?string $type = null): array
 {
     $pdo = get_pdo();
