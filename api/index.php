@@ -78,6 +78,11 @@ function route(string $method, string $path, PDO $db): void
         return;
     }
 
+    if ($path === 'summary/monthly') {
+        $method === 'GET' ? summaryMonthly($db) : notFound();
+        return;
+    }
+
     notFound();
 }
 
@@ -186,6 +191,47 @@ function summaryCategories(PDO $db): void
     echo json_encode(['data' => $stmt->fetchAll()]);
 }
 
+function summaryMonthly(PDO $db): void
+{
+    $monthParam = $_GET['month'] ?? '';
+    $start = monthStart($monthParam);
+    $end = (clone $start)->modify('last day of this month')->setTime(23, 59, 59);
+
+    $range = [
+        ':start' => $start->format('Y-m-d H:i:s'),
+        ':end' => $end->format('Y-m-d H:i:s'),
+    ];
+
+    // Daily totals within month
+    $dailyStmt = $db->prepare('SELECT date(occurred_at) AS day, SUM(amount) AS total FROM expenses WHERE occurred_at BETWEEN :start AND :end GROUP BY day ORDER BY day ASC');
+    $dailyStmt->execute($range);
+    $daily = $dailyStmt->fetchAll();
+
+    // Category totals within month
+    $catStmt = $db->prepare('SELECT c.id, c.name, c.color, SUM(e.amount) AS total FROM expenses e LEFT JOIN categories c ON e.category_id = c.id WHERE e.occurred_at BETWEEN :start AND :end GROUP BY c.id, c.name, c.color ORDER BY total DESC');
+    $catStmt->execute($range);
+    $categories = $catStmt->fetchAll();
+
+    $totalStmt = $db->prepare('SELECT SUM(amount) AS total, COUNT(DISTINCT date(occurred_at)) AS days FROM expenses WHERE occurred_at BETWEEN :start AND :end');
+    $totalStmt->execute($range);
+    $totals = $totalStmt->fetch();
+
+    $daysInMonth = (int)$start->format('t');
+    $total = (float)($totals['total'] ?? 0);
+    $average = $daysInMonth > 0 ? $total / $daysInMonth : 0;
+
+    echo json_encode([
+        'data' => [
+            'month' => $start->format('Y-m'),
+            'daily' => $daily,
+            'categories' => $categories,
+            'total' => $total,
+            'average_per_day' => $average,
+            'days_with_data' => (int)($totals['days'] ?? 0),
+        ],
+    ]);
+}
+
 function readJson(): array
 {
     $raw = file_get_contents('php://input');
@@ -201,6 +247,18 @@ function dateRangeFromQuery(): array
     $from = $_GET['from'] ?? null;
     $to = $_GET['to'] ?? null;
     return [$from ? trim($from) : null, $to ? trim($to) : null];
+}
+
+function monthStart(string $monthParam): DateTimeImmutable
+{
+    if ($monthParam) {
+        $monthParam = trim($monthParam);
+        $parts = explode('-', $monthParam);
+        if (count($parts) === 2 && ctype_digit($parts[0]) && ctype_digit($parts[1])) {
+            return (new DateTimeImmutable(sprintf('%04d-%02d-01', (int)$parts[0], (int)$parts[1])))->setTime(0, 0);
+        }
+    }
+    return (new DateTimeImmutable('first day of this month'))->setTime(0, 0);
 }
 
 function badRequest(string $message): void

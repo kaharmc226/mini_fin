@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { BrowserRouter as Router, Routes, Route, NavLink } from 'react-router-dom';
 import {
   Chart as ChartJS,
   ArcElement,
@@ -7,16 +8,48 @@ import {
   LineElement,
   PointElement,
   CategoryScale,
-  LinearScale
+  LinearScale,
+  BarElement
 } from 'chart.js';
-import { Doughnut, Line } from 'react-chartjs-2';
+import { Doughnut, Line, Bar } from 'react-chartjs-2';
 
-ChartJS.register(ArcElement, Tooltip, Legend, LineElement, PointElement, CategoryScale, LinearScale);
+ChartJS.register(ArcElement, Tooltip, Legend, LineElement, PointElement, CategoryScale, LinearScale, BarElement);
 
 const API_BASE = 'http://localhost:8000';
 const LAST_CATEGORY_KEY = 'mini-fin:last-category';
 
 export default function App() {
+  return (
+    <Router>
+      <div className="app-shell">
+        <TopNav />
+        <main className="page">
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/reports" element={<Reports />} />
+          </Routes>
+        </main>
+      </div>
+    </Router>
+  );
+}
+
+function TopNav() {
+  return (
+    <nav className="top-nav">
+      <div className="brand">Mini Fin</div>
+      <div className="nav-links">
+        <NavLink to="/" end>
+          Dashboard
+        </NavLink>
+        <NavLink to="/reports">Reports</NavLink>
+      </div>
+    </nav>
+  );
+}
+
+// Dashboard page: quick add, daily nudge, weekly trend, categories, entries.
+function Dashboard() {
   const amountRef = useRef(null);
   const [categories, setCategories] = useState([]);
   const [dailyTrend, setDailyTrend] = useState([]);
@@ -83,7 +116,7 @@ export default function App() {
   );
 
   const handleDayClick = useCallback(
-    async (items, event) => {
+    async (items) => {
       if (!items || items.length === 0) return;
       const pointIndex = items[0].index;
       const point = dailyTrend[pointIndex];
@@ -92,7 +125,6 @@ export default function App() {
     },
     [dailyTrend, loadDay]
   );
-  };
 
   const handleChange = (field, value) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -110,7 +142,7 @@ export default function App() {
     });
 
     window.localStorage.setItem(LAST_CATEGORY_KEY, String(form.category_id));
-    setToast('Expense saved ✓');
+    setToast('Expense saved');
     setTimeout(() => setToast(''), 2200);
     setForm((prev) => ({
       ...prev,
@@ -128,7 +160,7 @@ export default function App() {
   const categoryChart = useMemo(() => buildCategoryChart(categorySummary), [categorySummary]);
 
   return (
-    <div className="page">
+    <>
       <header className="header">
         <div>
           <p className="eyebrow">Spending awareness</p>
@@ -173,7 +205,7 @@ export default function App() {
         </Card>
       </div>
 
-      <Card title="Today">
+      <Card title="Entries">
         {dayExpenses.length === 0 ? (
           <EmptyState message="Select a day on the chart to view its entries." />
         ) : (
@@ -186,7 +218,7 @@ export default function App() {
                 <div>
                   <div className="label">{item.note || 'Expense'}</div>
                   <div className="muted">
-                    {item.category_name || 'Category'} · {formatTime(item.occurred_at)}
+                    {item.category_name || 'Category'} - {formatTime(item.occurred_at)}
                   </div>
                 </div>
                 <div className="amount">Rp {formatNumber(item.amount)}</div>
@@ -195,14 +227,125 @@ export default function App() {
           </ul>
         )}
       </Card>
-    </div>
+    </>
+  );
+}
+
+// Reports page: month overview with daily bars and category breakdown.
+function Reports() {
+  const [month, setMonth] = useState(() => monthKey(new Date()));
+  const [summary, setSummary] = useState({ daily: [], categories: [], total: 0, average_per_day: 0 });
+  const [selectedDay, setSelectedDay] = useState(null);
+  const [dayExpenses, setDayExpenses] = useState([]);
+
+  useEffect(() => {
+    loadMonth(month);
+  }, [month]);
+
+  const loadMonth = async (monthKeyValue) => {
+    const res = await apiGet(`/summary/monthly?month=${monthKeyValue}`);
+    setSummary(res.data || { daily: [], categories: [], total: 0, average_per_day: 0 });
+    setSelectedDay(null);
+    setDayExpenses([]);
+  };
+
+  const changeMonth = (delta) => {
+    const [year, mon] = month.split('-').map((v) => Number(v));
+    const next = new Date(year, mon - 1 + delta, 1);
+    setMonth(monthKey(next));
+  };
+
+  const handleDayClick = async (items) => {
+    if (!items || items.length === 0) return;
+    const idx = items[0].index;
+    const point = summary.daily[idx];
+    if (!point) return;
+    const day = point.day;
+    const from = `${day}T00:00:00`;
+    const to = `${day}T23:59:59`;
+    const res = await apiGet(`/expenses?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+    setSelectedDay(day);
+    setDayExpenses(res.data || []);
+  };
+
+  const dailyChart = useMemo(() => buildMonthBarChart(summary.daily, handleDayClick), [summary.daily]);
+  const categoryChart = useMemo(() => buildCategoryChart(summary.categories), [summary.categories]);
+
+  return (
+    <>
+      <header className="header">
+        <div>
+          <p className="eyebrow">Monthly overview</p>
+          <h1>Reports</h1>
+        </div>
+        <div className="month-switcher">
+          <button className="ghost" onClick={() => changeMonth(-1)}>{'<'}</button>
+          <div className="month-label">{prettyMonth(month)}</div>
+          <button className="ghost" onClick={() => changeMonth(1)}>{'>'}</button>
+        </div>
+      </header>
+
+      <div className="grid two">
+        <Card title="Month total">
+          <div className="stat">
+            <div className="stat-label">Total</div>
+            <div className="stat-value">Rp {formatNumber(summary.total)}</div>
+          </div>
+          <div className="stat">
+            <div className="stat-label">Average per day</div>
+            <div className="stat-value">Rp {formatNumber(summary.average_per_day)}</div>
+          </div>
+        </Card>
+        <Card title="Categories this month">
+          {summary.categories.length === 0 ? (
+            <EmptyState message="No data for this month yet." />
+          ) : (
+            <div className="chart">
+              <Doughnut data={categoryChart.data} options={categoryChart.options} />
+            </div>
+          )}
+        </Card>
+      </div>
+
+      <Card title="Daily totals">
+        {summary.daily.length === 0 ? (
+          <EmptyState message="No spending logged for this month." />
+        ) : (
+          <div className="chart">
+            <Bar data={dailyChart.data} options={dailyChart.options} />
+          </div>
+        )}
+      </Card>
+
+      <Card title={selectedDay ? `Entries for ${selectedDay}` : 'Entries'}>
+        {selectedDay === null || dayExpenses.length === 0 ? (
+          <EmptyState message="Click a day bar to see its entries." />
+        ) : (
+          <ul className="list">
+            {dayExpenses.map((item) => (
+              <li key={item.id} className="list-row">
+                <div>
+                  <div className="label">{item.note || 'Expense'}</div>
+                  <div className="muted">
+                    {item.category_name || 'Category'} - {formatTime(item.occurred_at)}
+                  </div>
+                </div>
+                <div className="amount">Rp {formatNumber(item.amount)}</div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+    </>
   );
 }
 
 function NudgeCard({ stats }) {
   const hasToday = stats.count > 0;
   const message = hasToday
-    ? `You've logged ${stats.count} expense${stats.count > 1 ? 's' : ''} today. Today’s spending so far: Rp ${formatNumber(stats.total)}`
+    ? `You've logged ${stats.count} expense${stats.count > 1 ? 's' : ''} today. Today's spending so far: Rp ${formatNumber(
+        stats.total
+      )}`
     : "You haven't logged any expenses today. Add your first one to start tracking.";
 
   return (
@@ -299,6 +442,16 @@ function defaultDateTimeValue() {
   return new Date(Date.now() - tzOffset).toISOString().slice(0, 16);
 }
 
+function monthKey(date) {
+  const d = typeof date === 'string' ? new Date(date) : date;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function prettyMonth(monthStr) {
+  const [y, m] = monthStr.split('-').map((v) => Number(v));
+  return new Date(y, m - 1, 1).toLocaleDateString('en', { month: 'long', year: 'numeric' });
+}
+
 function buildTrendChart(points, onPointClick) {
   const labels = points.map((p) => p.day);
   const data = points.map((p) => Number(p.total || 0));
@@ -314,6 +467,30 @@ function buildTrendChart(points, onPointClick) {
           tension: 0.3,
           fill: true,
           pointRadius: 3
+        }
+      ]
+    },
+    options: {
+      plugins: { legend: { display: false } },
+      scales: { y: { ticks: { callback: (v) => `Rp ${formatNumber(v)}` } } },
+      responsive: true,
+      maintainAspectRatio: false,
+      onClick: (_, elements) => onPointClick && onPointClick(elements)
+    }
+  };
+}
+
+function buildMonthBarChart(points, onPointClick) {
+  const labels = points.map((p) => p.day.split('-')[2]); // day number
+  const data = points.map((p) => Number(p.total || 0));
+  return {
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Daily total',
+          data,
+          backgroundColor: '#2563eb'
         }
       ]
     },
