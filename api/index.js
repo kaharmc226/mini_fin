@@ -199,4 +199,7 @@ if (process.env.VERCEL !== '1' && process.env.NODE_ENV !== 'production') {
   });
 }
 
-export default app;
+// Vercel expects a handler function
+export default function handler(req, res) {
+  return app(req, res);
+}
