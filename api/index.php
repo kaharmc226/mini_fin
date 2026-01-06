@@ -1,23 +1,30 @@
 <?php
-// Simple PHP + SQLite API for expense tracking.
+// Simple PHP API for expense tracking with SQLite (default) or custom PDO DSN.
 
 declare(strict_types=1);
 
 header('Content-Type: application/json');
-header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type');
+
+$corsOrigin = getenv('API_CORS_ORIGIN') ?: '*';
+header("Access-Control-Allow-Origin: {$corsOrigin}");
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(204);
     exit;
 }
 
-$dbPath = __DIR__ . '/../data/expenses.sqlite';
 $schemaPath = __DIR__ . '/../schema.sql';
 
+$config = [
+    'dsn' => getenv('DATABASE_DSN') ?: 'sqlite:' . realpath(__DIR__ . '/../data/expenses.sqlite'),
+    'user' => getenv('DATABASE_USER') ?: null,
+    'password' => getenv('DATABASE_PASSWORD') ?: null,
+];
+
 try {
-    $db = new PDO('sqlite:' . $dbPath);
+    $db = new PDO($config['dsn'], $config['user'], $config['password']);
     $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $db->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
@@ -40,6 +47,11 @@ try {
 
 function ensureSchema(PDO $db, string $schemaPath): void
 {
+    // Only auto-run schema for SQLite; other DBs should be migrated separately.
+    if ($db->getAttribute(PDO::ATTR_DRIVER_NAME) !== 'sqlite') {
+        return;
+    }
+
     if (!file_exists($schemaPath)) {
         return;
     }
@@ -123,11 +135,11 @@ function listExpenses(PDO $db): void
     $where = [];
 
     if ($from) {
-        $where[] = 'occurred_at >= :from';
+        $where[] = 'datetime(e.occurred_at) >= datetime(:from)';
         $params[':from'] = $from;
     }
     if ($to) {
-        $where[] = 'occurred_at <= :to';
+        $where[] = 'datetime(e.occurred_at) <= datetime(:to)';
         $params[':to'] = $to;
     }
 
@@ -177,7 +189,7 @@ function summaryDaily(PDO $db): void
 {
     $days = max(1, (int)($_GET['days'] ?? 7));
     $from = (new DateTimeImmutable())->modify("-{$days} days")->setTime(0, 0);
-    $stmt = $db->prepare('SELECT date(occurred_at) AS day, SUM(amount) AS total FROM expenses WHERE occurred_at >= :from GROUP BY day ORDER BY day ASC');
+    $stmt = $db->prepare('SELECT date(occurred_at) AS day, SUM(amount) AS total FROM expenses WHERE datetime(occurred_at) >= datetime(:from) GROUP BY day ORDER BY day ASC');
     $stmt->execute([':from' => $from->format('Y-m-d H:i:s')]);
     echo json_encode(['data' => $stmt->fetchAll()]);
 }
@@ -186,7 +198,7 @@ function summaryCategories(PDO $db): void
 {
     $days = max(1, (int)($_GET['days'] ?? 30));
     $from = (new DateTimeImmutable())->modify("-{$days} days")->setTime(0, 0);
-    $stmt = $db->prepare('SELECT c.id, c.name, c.color, SUM(e.amount) AS total FROM expenses e LEFT JOIN categories c ON e.category_id = c.id WHERE e.occurred_at >= :from GROUP BY c.id, c.name, c.color ORDER BY total DESC');
+    $stmt = $db->prepare('SELECT c.id, c.name, c.color, SUM(e.amount) AS total FROM expenses e LEFT JOIN categories c ON e.category_id = c.id WHERE datetime(e.occurred_at) >= datetime(:from) GROUP BY c.id, c.name, c.color ORDER BY total DESC');
     $stmt->execute([':from' => $from->format('Y-m-d H:i:s')]);
     echo json_encode(['data' => $stmt->fetchAll()]);
 }
@@ -203,16 +215,16 @@ function summaryMonthly(PDO $db): void
     ];
 
     // Daily totals within month
-    $dailyStmt = $db->prepare('SELECT date(occurred_at) AS day, SUM(amount) AS total FROM expenses WHERE occurred_at BETWEEN :start AND :end GROUP BY day ORDER BY day ASC');
+    $dailyStmt = $db->prepare('SELECT date(occurred_at) AS day, SUM(amount) AS total FROM expenses WHERE datetime(occurred_at) BETWEEN datetime(:start) AND datetime(:end) GROUP BY day ORDER BY day ASC');
     $dailyStmt->execute($range);
     $daily = $dailyStmt->fetchAll();
 
     // Category totals within month
-    $catStmt = $db->prepare('SELECT c.id, c.name, c.color, SUM(e.amount) AS total FROM expenses e LEFT JOIN categories c ON e.category_id = c.id WHERE e.occurred_at BETWEEN :start AND :end GROUP BY c.id, c.name, c.color ORDER BY total DESC');
+    $catStmt = $db->prepare('SELECT c.id, c.name, c.color, SUM(e.amount) AS total FROM expenses e LEFT JOIN categories c ON e.category_id = c.id WHERE datetime(e.occurred_at) BETWEEN datetime(:start) AND datetime(:end) GROUP BY c.id, c.name, c.color ORDER BY total DESC');
     $catStmt->execute($range);
     $categories = $catStmt->fetchAll();
 
-    $totalStmt = $db->prepare('SELECT SUM(amount) AS total, COUNT(DISTINCT date(occurred_at)) AS days FROM expenses WHERE occurred_at BETWEEN :start AND :end');
+    $totalStmt = $db->prepare('SELECT SUM(amount) AS total, COUNT(DISTINCT date(occurred_at)) AS days FROM expenses WHERE datetime(occurred_at) BETWEEN datetime(:start) AND datetime(:end)');
     $totalStmt->execute($range);
     $totals = $totalStmt->fetch();
 

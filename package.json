@@ -1,0 +1,16 @@
+{
+  "name": "mini-fin-root",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:api": "node api-node/index.js",
+    "migrate:api": "node api-node/migrate.js",
+    "seed:api": "node api-node/seed.js"
+  },
+  "dependencies": {
+    "@vercel/postgres": "^0.8.0",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "luxon": "^3.4.4"
+  }
+}

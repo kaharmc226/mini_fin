@@ -15,7 +15,7 @@ import { Doughnut, Line, Bar } from 'react-chartjs-2';
 
 ChartJS.register(ArcElement, Tooltip, Legend, LineElement, PointElement, CategoryScale, LinearScale, BarElement);
 
-const API_BASE = 'http://localhost:8000';
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
 const LAST_CATEGORY_KEY = 'mini-fin:last-category';
 
 export default function App() {

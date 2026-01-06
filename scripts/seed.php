@@ -34,7 +34,7 @@ for ($i = 0; $i < 200; $i++) {
         'amount' => $amount,
         'category_id' => $category,
         'note' => $note,
-        'occurred_at' => $date->format('Y-m-d H:i:s'),
+        'occurred_at' => $date->format('Y-m-d\\TH:i:s'),
     ];
 }
 
