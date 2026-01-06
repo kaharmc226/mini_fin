@@ -3,9 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev:api": "node api-node/index.js",
-    "migrate:api": "node api-node/migrate.js",
-    "seed:api": "node api-node/seed.js"
+    "dev:api": "node api/index.js",
+    "migrate:api": "node api/migrate.js",
+    "seed:api": "node api/seed.js"
   },
   "dependencies": {
     "@vercel/postgres": "^0.8.0",

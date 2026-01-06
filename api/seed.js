@@ -2,10 +2,9 @@ import { sql } from '@vercel/postgres';
 import { DateTime } from 'luxon';
 
 async function seed() {
-  // Clear existing expenses only (keep categories)
   await sql`DELETE FROM expenses`;
 
-  const categories = await sql`SELECT id, name FROM categories ORDER BY id`;
+  const categories = await sql`SELECT id FROM categories ORDER BY id`;
   const categoryIds = categories.rows.map((c) => c.id);
   if (categoryIds.length === 0) {
     console.log('No categories found; run migrate first.');
