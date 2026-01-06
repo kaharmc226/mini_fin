@@ -1,11 +1,23 @@
 import express from 'express';
 import cors from 'cors';
-import { sql } from '@vercel/postgres';
+import { Pool } from 'pg';
 import { DateTime } from 'luxon';
 
 const app = express();
 const PORT = process.env.PORT || 8000;
 const corsOrigin = process.env.API_CORS_ORIGIN || '*';
+
+const connectionString =
+  process.env.POSTGRES_PRISMA_URL || process.env.POSTGRES_URL || process.env.DATABASE_URL;
+if (!connectionString) {
+  console.warn('No Postgres connection string found. Set POSTGRES_URL or DATABASE_URL.');
+}
+const pool = new Pool({
+  connectionString,
+  ssl: connectionString && connectionString.includes('sslmode=') ? false : { rejectUnauthorized: false }
+});
+
+const query = (text, params) => pool.query(text, params);
 
 app.use(cors({ origin: corsOrigin === '*' ? true : corsOrigin }));
 app.use(express.json());
@@ -16,7 +28,7 @@ app.get('/api/health', (req, res) => {
 
 app.get('/api/categories', async (req, res) => {
   try {
-    const { rows } = await sql`SELECT id, name, color, created_at FROM categories ORDER BY name ASC`;
+    const { rows } = await query('SELECT id, name, color, created_at FROM categories ORDER BY name ASC');
     res.json({ data: rows });
   } catch (err) {
     sendError(res, err);
@@ -27,12 +39,13 @@ app.post('/api/categories', async (req, res) => {
   const { name, color } = req.body || {};
   if (!name || !name.trim()) return badRequest(res, 'Category name is required.');
   try {
-    const { rows } = await sql`
-      INSERT INTO categories (name, color)
-      VALUES (${name.trim()}, ${color || null})
-      ON CONFLICT (name) DO NOTHING
-      RETURNING id, name, color
-    `;
+    const { rows } = await query(
+      `INSERT INTO categories (name, color)
+       VALUES ($1, $2)
+       ON CONFLICT (name) DO NOTHING
+       RETURNING id, name, color`,
+      [name.trim(), color || null]
+    );
     if (rows.length === 0) return badRequest(res, 'Category already exists.');
     res.status(201).json(rows[0]);
   } catch (err) {
@@ -63,7 +76,7 @@ app.get('/api/expenses', async (req, res) => {
     ORDER BY e.occurred_at DESC, e.id DESC
   `;
   try {
-    const { rows } = await sql.unsafe(query, params);
+    const { rows } = await pool.query(query, params);
     res.json({ data: rows });
   } catch (err) {
     sendError(res, err);
@@ -76,11 +89,12 @@ app.post('/api/expenses', async (req, res) => {
   if (!category_id) return badRequest(res, 'Category is required.');
   if (!occurred_at) return badRequest(res, 'occurred_at is required (ISO date or datetime).');
   try {
-    const { rows } = await sql`
-      INSERT INTO expenses (amount, category_id, note, occurred_at)
-      VALUES (${amount}, ${category_id}, ${note || null}, ${occurred_at})
-      RETURNING id
-    `;
+    const { rows } = await query(
+      `INSERT INTO expenses (amount, category_id, note, occurred_at)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id`,
+      [amount, category_id, note || null, occurred_at]
+    );
     res.status(201).json(rows[0]);
   } catch (err) {
     sendError(res, err);
@@ -91,13 +105,14 @@ app.get('/api/summary/daily', async (req, res) => {
   const days = Math.max(1, Number(req.query.days) || 7);
   const from = DateTime.now().minus({ days }).startOf('day').toISO();
   try {
-    const { rows } = await sql`
-      SELECT date_trunc('day', occurred_at) AS day, SUM(amount)::float AS total
-      FROM expenses
-      WHERE occurred_at >= ${from}
-      GROUP BY day
-      ORDER BY day ASC
-    `;
+    const { rows } = await query(
+      `SELECT date_trunc('day', occurred_at) AS day, SUM(amount)::float AS total
+       FROM expenses
+       WHERE occurred_at >= $1
+       GROUP BY day
+       ORDER BY day ASC`,
+      [from]
+    );
     res.json({ data: rows.map((r) => ({ day: DateTime.fromJSDate(r.day).toISODate(), total: r.total })) });
   } catch (err) {
     sendError(res, err);
@@ -108,14 +123,15 @@ app.get('/api/summary/categories', async (req, res) => {
   const days = Math.max(1, Number(req.query.days) || 30);
   const from = DateTime.now().minus({ days }).startOf('day').toISO();
   try {
-    const { rows } = await sql`
-      SELECT c.id, c.name, c.color, SUM(e.amount)::float AS total
-      FROM expenses e
-      LEFT JOIN categories c ON e.category_id = c.id
-      WHERE e.occurred_at >= ${from}
-      GROUP BY c.id, c.name, c.color
-      ORDER BY total DESC
-    `;
+    const { rows } = await query(
+      `SELECT c.id, c.name, c.color, SUM(e.amount)::float AS total
+       FROM expenses e
+       LEFT JOIN categories c ON e.category_id = c.id
+       WHERE e.occurred_at >= $1
+       GROUP BY c.id, c.name, c.color
+       ORDER BY total DESC`,
+      [from]
+    );
     res.json({ data: rows });
   } catch (err) {
     sendError(res, err);
@@ -127,26 +143,29 @@ app.get('/api/summary/monthly', async (req, res) => {
   const start = month ? DateTime.fromISO(month + '-01', { zone: 'utc' }) : DateTime.now().startOf('month');
   const end = start.endOf('month');
   try {
-    const daily = await sql`
-      SELECT date_trunc('day', occurred_at) AS day, SUM(amount)::float AS total
-      FROM expenses
-      WHERE occurred_at BETWEEN ${start.toISO()} AND ${end.toISO()}
-      GROUP BY day
-      ORDER BY day ASC
-    `;
-    const categories = await sql`
-      SELECT c.id, c.name, c.color, SUM(e.amount)::float AS total
-      FROM expenses e
-      LEFT JOIN categories c ON e.category_id = c.id
-      WHERE e.occurred_at BETWEEN ${start.toISO()} AND ${end.toISO()}
-      GROUP BY c.id, c.name, c.color
-      ORDER BY total DESC
-    `;
-    const totals = await sql`
-      SELECT SUM(amount)::float AS total, COUNT(DISTINCT date_trunc('day', occurred_at)) AS days
-      FROM expenses
-      WHERE occurred_at BETWEEN ${start.toISO()} AND ${end.toISO()}
-    `;
+    const daily = await query(
+      `SELECT date_trunc('day', occurred_at) AS day, SUM(amount)::float AS total
+       FROM expenses
+       WHERE occurred_at BETWEEN $1 AND $2
+       GROUP BY day
+       ORDER BY day ASC`,
+      [start.toISO(), end.toISO()]
+    );
+    const categories = await query(
+      `SELECT c.id, c.name, c.color, SUM(e.amount)::float AS total
+       FROM expenses e
+       LEFT JOIN categories c ON e.category_id = c.id
+       WHERE e.occurred_at BETWEEN $1 AND $2
+       GROUP BY c.id, c.name, c.color
+       ORDER BY total DESC`,
+      [start.toISO(), end.toISO()]
+    );
+    const totals = await query(
+      `SELECT SUM(amount)::float AS total, COUNT(DISTINCT date_trunc('day', occurred_at)) AS days
+       FROM expenses
+       WHERE occurred_at BETWEEN $1 AND $2`,
+      [start.toISO(), end.toISO()]
+    );
     const total = totals.rows[0]?.total || 0;
     const daysInMonth = start.daysInMonth;
     res.json({

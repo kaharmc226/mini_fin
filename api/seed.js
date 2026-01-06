@@ -1,10 +1,24 @@
-import { sql } from '@vercel/postgres';
+import { Pool } from 'pg';
 import { DateTime } from 'luxon';
 
-async function seed() {
-  await sql`DELETE FROM expenses`;
+const connectionString =
+  process.env.POSTGRES_PRISMA_URL || process.env.POSTGRES_URL || process.env.DATABASE_URL;
+if (!connectionString) {
+  console.error('No Postgres connection string found. Set POSTGRES_URL or DATABASE_URL.');
+  process.exit(1);
+}
 
-  const categories = await sql`SELECT id FROM categories ORDER BY id`;
+const pool = new Pool({
+  connectionString,
+  ssl: connectionString.includes('sslmode=') ? false : { rejectUnauthorized: false }
+});
+
+const query = (text, params) => pool.query(text, params);
+
+async function seed() {
+  await query('DELETE FROM expenses');
+
+  const categories = await query('SELECT id FROM categories ORDER BY id');
   const categoryIds = categories.rows.map((c) => c.id);
   if (categoryIds.length === 0) {
     console.log('No categories found; run migrate first.');
@@ -25,12 +39,14 @@ async function seed() {
   }
 
   for (const e of entries) {
-    await sql`
-      INSERT INTO expenses (amount, category_id, note, occurred_at)
-      VALUES (${e.amount}, ${e.category_id}, ${e.note}, ${e.occurred_at})
-    `;
+    await query(
+      `INSERT INTO expenses (amount, category_id, note, occurred_at)
+       VALUES ($1, $2, $3, $4)`,
+      [e.amount, e.category_id, e.note, e.occurred_at]
+    );
   }
   console.log(`Seeded ${entries.length} expenses.`);
+  await pool.end();
 }
 
 function rand(min, max) {
@@ -48,8 +64,8 @@ function sampleNote(categoryId) {
     7: ['Movie night', 'Streaming subscription', 'Games top-up'],
     8: ['Misc purchase', 'Gift', 'Other'],
   };
-  const pool = notes[categoryId] || ['Expense'];
-  return pool[Math.floor(Math.random() * pool.length)];
+  const poolNotes = notes[categoryId] || ['Expense'];
+  return poolNotes[Math.floor(Math.random() * poolNotes.length)];
 }
 
 seed().catch((err) => {
