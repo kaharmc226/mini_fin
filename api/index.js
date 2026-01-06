@@ -22,11 +22,11 @@ const query = (text, params) => pool.query(text, params);
 app.use(cors({ origin: corsOrigin === '*' ? true : corsOrigin }));
 app.use(express.json());
 
-app.get('/api/health', (req, res) => {
+app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-app.get('/api/categories', async (req, res) => {
+app.get('/categories', async (req, res) => {
   try {
     const { rows } = await query('SELECT id, name, color, created_at FROM categories ORDER BY name ASC');
     res.json({ data: rows });
@@ -35,7 +35,7 @@ app.get('/api/categories', async (req, res) => {
   }
 });
 
-app.post('/api/categories', async (req, res) => {
+app.post('/categories', async (req, res) => {
   const { name, color } = req.body || {};
   if (!name || !name.trim()) return badRequest(res, 'Category name is required.');
   try {
@@ -53,7 +53,7 @@ app.post('/api/categories', async (req, res) => {
   }
 });
 
-app.get('/api/expenses', async (req, res) => {
+app.get('/expenses', async (req, res) => {
   const { from, to } = req.query;
   const where = [];
   const params = [];
@@ -83,7 +83,7 @@ app.get('/api/expenses', async (req, res) => {
   }
 });
 
-app.post('/api/expenses', async (req, res) => {
+app.post('/expenses', async (req, res) => {
   const { amount, category_id, note, occurred_at } = req.body || {};
   if (!amount || Number(amount) <= 0) return badRequest(res, 'Amount must be greater than zero.');
   if (!category_id) return badRequest(res, 'Category is required.');
@@ -101,7 +101,7 @@ app.post('/api/expenses', async (req, res) => {
   }
 });
 
-app.get('/api/summary/daily', async (req, res) => {
+app.get('/summary/daily', async (req, res) => {
   const days = Math.max(1, Number(req.query.days) || 7);
   const from = DateTime.now().minus({ days }).startOf('day').toISO();
   try {
@@ -119,7 +119,7 @@ app.get('/api/summary/daily', async (req, res) => {
   }
 });
 
-app.get('/api/summary/categories', async (req, res) => {
+app.get('/summary/categories', async (req, res) => {
   const days = Math.max(1, Number(req.query.days) || 30);
   const from = DateTime.now().minus({ days }).startOf('day').toISO();
   try {
@@ -138,7 +138,7 @@ app.get('/api/summary/categories', async (req, res) => {
   }
 });
 
-app.get('/api/summary/monthly', async (req, res) => {
+app.get('/summary/monthly', async (req, res) => {
   const { month } = req.query; // YYYY-MM
   const start = month ? DateTime.fromISO(month + '-01', { zone: 'utc' }) : DateTime.now().startOf('month');
   const end = start.endOf('month');
