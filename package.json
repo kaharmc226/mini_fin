@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "npm install --prefix web && npm run build --prefix web",
     "dev:api": "node api/index.js",
     "migrate:api": "node api/migrate.js",
     "seed:api": "node api/seed.js"
